@@ -96,7 +96,7 @@ def main(rank, args):
         print('Total number of files: ', len(filenames))
     local_filenames = filenames[(len(filenames) // args.world_size + 1) * rank : (len(filenames) // args.world_size + 1) * (rank + 1)]
 
-    for file_name in local_filenames:
+    for file_name in sorted(local_filenames):
         with torch.no_grad():
             semantic_annotation_pipeline(file_name, args.data_dir, args.out_dir, rank, save_img=args.save_img,
                                         clip_processor=clip_processor, clip_model=clip_model,

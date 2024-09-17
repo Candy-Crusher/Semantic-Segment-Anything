@@ -19,6 +19,38 @@ from oneformer import oneformer_coco_segmentation, oneformer_ade20k_segmentation
 from blip import open_vocabulary_classification_blip
 from segformer import segformer_segmentation as segformer_func
 
+cs_semseg_dict = {
+    "num_classes": 19,
+    "ignore_label": 255,
+    "class_names": [
+        "road", "sidewalk", "building", "wall", "fence",
+        "pole", "traffic light", "traffic sign", "vegetation", "terrain",
+        "sky", "person", "rider", "car", "truck", "bus",
+        "train", "motorcycle", "bicycle"
+    ],
+    "color_map": np.array([
+        [128, 64, 128],      # road
+        [244, 35, 232],      # sidewalk
+        [70, 70, 70],        # building
+        [102, 102, 156],     # wall
+        [190, 153, 153],     # fence
+        [153, 153, 153],     # pole
+        [250, 170, 30],      # traffic light
+        [220, 220, 0],       # traffic sign
+        [107, 142, 35],      # vegetation
+        [152, 251, 152],     # terrain
+        [70, 130, 180],      # sky
+        [220, 20, 60],       # person
+        [255, 0, 0],         # rider
+        [0, 0, 142],         # car
+        [0, 0, 70],          # truck
+        [0, 60, 100],        # bus
+        [0, 80, 100],        # train
+        [0, 0, 230],         # motorcycle
+        [119, 11, 32]        # bicycle
+    ], dtype=np.uint8)
+}
+
 oneformer_func = {
     'ade20k': oneformer_ade20k_segmentation,
     'coco': oneformer_coco_segmentation,
@@ -144,13 +176,13 @@ def img_load(data_path, filename, dataset):
     # load image
     if dataset == 'ade20k':
         img = mmcv.imread(os.path.join(data_path, filename+'.jpg'))
-    elif dataset == 'cityscapes' or dataset == 'foggy_driving':
+    elif dataset == 'cityscapes' or dataset == 'foggy_driving' or dataset == 'dsec':
         img = mmcv.imread(os.path.join(data_path, filename+'.png'))
     else:
         raise NotImplementedError()
     return img
 
-def semantic_segment_anything_inference(filename, output_path, rank, img=None, save_img=False,
+def semantic_segment_anything_inference(filename, output_path, rank, img=None, save_img=False, save_sem_map=False,
                                  semantic_branch_processor=None,
                                  semantic_branch_model=None,
                                  mask_branch_model=None,
@@ -168,6 +200,7 @@ def semantic_segment_anything_inference(filename, output_path, rank, img=None, s
         class_ids = segformer_func(img, semantic_branch_processor, semantic_branch_model, rank)
     else:
         raise NotImplementedError()
+
     semantc_mask = class_ids.clone()
     anns['annotations'] = sorted(anns['annotations'], key=lambda x: x['area'], reverse=True)
     for ann in anns['annotations']:
@@ -202,6 +235,7 @@ def semantic_segment_anything_inference(filename, output_path, rank, img=None, s
 
     # semantic prediction
     anns['semantic_mask'] = {}
+
     for i in range(len(sematic_class_in_img)):
         class_name = id2label['id2label'][str(sematic_class_in_img[i].item())]
         class_mask = semantc_mask == sematic_class_in_img[i]
@@ -221,6 +255,21 @@ def semantic_segment_anything_inference(filename, output_path, rank, img=None, s
                             show=False,
                             out_file=os.path.join(output_path, filename + '_semantic.png'))
         print('[Save] save SSA prediction: ', os.path.join(output_path, filename + '_semantic.png'))
+    if save_sem_map:
+        # Convert the semantic mask to a numpy array
+        semantc_mask_np = class_ids.cpu().numpy().astype(np.uint8)
+        # Create the filename for the semantic map
+        sem_map_filename = os.path.join(output_path, filename + '_labelTrainIds.png')
+        # Save the semantic map as a PNG file
+        Image.fromarray(semantc_mask_np).save(sem_map_filename)
+
+        if dataset == 'cityscapes' or dataset == 'foggy_driving' or dataset == 'dsec':
+            # Convert the semantic mask to an RGB image
+            rgb_image = cs_semseg_dict['color_map'][semantc_mask_np]
+            # Create the filename for the semantic map
+            sem_rgb_filename = os.path.join(output_path, filename + '_color.png')
+            # Save the semantic map as a PNG file
+            Image.fromarray(rgb_image).save(sem_rgb_filename)
     mmcv.dump(anns, os.path.join(output_path, filename + '_semantic.json'))
     # 手动清理不再需要的变量
     del img
@@ -236,7 +285,7 @@ def semantic_segment_anything_inference(filename, output_path, rank, img=None, s
     
 def eval_pipeline(gt_path, res_path, dataset):
     logger = None
-    if dataset == 'cityscapes' or dataset == 'foggy_driving':
+    if dataset == 'cityscapes' or dataset == 'foggy_driving' or dataset == 'dsec':
         class_names = ('road', 'sidewalk', 'building', 'wall', 'fence', 'pole', 'traffic light', 'traffic sign', 'vegetation', 'terrain', 'sky', 'person', 'rider', 'car', 'truck', 'bus', 'train', 'motorcycle', 'bicycle')
     elif dataset == 'ade20k':
         class_names = ('wall', 'building', 'sky', 'floor', 'tree', 'ceiling', 'road', 'bed ', 'windowpane', 'grass', 'cabinet', 'sidewalk', 'person', 'earth', 'door', 'table', 'mountain', 'plant', 'curtain', 'chair', 'car', 'water', 'painting', 'sofa', 'shelf', 'house', 'sea', 'mirror', 'rug', 'field', 'armchair', 'seat', 'fence', 'desk', 'rock', 'wardrobe', 'lamp', 'bathtub', 'railing', 'cushion', 'base', 'box', 'column', 'signboard', 'chest of drawers', 'counter', 'sand', 'sink', 'skyscraper', 'fireplace', 'refrigerator', 'grandstand', 'path', 'stairs', 'runway', 'case', 'pool table', 'pillow', 'screen door', 'stairway', 'river', 'bridge', 'bookcase', 'blind', 'coffee table', 'toilet', 'flower', 'book', 'hill', 'bench', 'countertop', 'stove', 'palm', 'kitchen island', 'computer', 'swivel chair', 'boat', 'bar', 'arcade machine', 'hovel', 'bus', 'towel', 'light', 'truck', 'tower', 'chandelier', 'awning', 'streetlight', 'booth', 'television receiver', 'airplane', 'dirt track', 'apparel', 'pole', 'land', 'bannister', 'escalator', 'ottoman', 'bottle', 'buffet', 'poster', 'stage', 'van', 'ship', 'fountain', 'conveyer belt', 'canopy', 'washer', 'plaything', 'swimming pool', 'stool', 'barrel', 'basket', 'waterfall', 'tent', 'bag', 'minibike', 'cradle', 'oven', 'ball', 'food', 'step', 'tank', 'trade name', 'microwave', 'pot', 'animal', 'bicycle', 'lake', 'dishwasher', 'screen', 'blanket', 'sculpture', 'hood', 'sconce', 'vase', 'traffic light', 'tray', 'ashcan', 'fan', 'pier', 'crt screen', 'plate', 'monitor', 'bulletin board', 'shower', 'radiator', 'glass', 'clock', 'flag')
@@ -244,6 +293,8 @@ def eval_pipeline(gt_path, res_path, dataset):
     pre_eval_results = []
     if dataset == 'cityscapes':
         prefixs = ['frankfurt','lindau','munster']
+    if dataset == 'dsec':
+        prefixs = ['zurcih_city_12_a']
     elif dataset == 'foggy_driving':
         prefixs = ['public', 'pedestrian']
     elif dataset == 'ade20k':
@@ -254,7 +305,7 @@ def eval_pipeline(gt_path, res_path, dataset):
         gt_path_split = os.path.join(gt_path, split)
         res_path_split = os.path.join(res_path, split)
         filenames = [fn_ for fn_ in os.listdir(res_path_split) if '.json' in fn_]
-        for i, fn_ in enumerate(tqdm(filenames, desc="File loop")):
+        for i, fn_ in enumerate(tqdm(sorted(filenames), desc="File loop")):
             pred_fn = os.path.join(res_path_split, fn_)
             result = mmcv.load(pred_fn)
             num_classes = len(class_names)
@@ -273,6 +324,8 @@ def eval_pipeline(gt_path, res_path, dataset):
             seg_pred = F.softmax(seg_logit, dim=1).argmax(dim=1).squeeze(0).numpy()
             if dataset == 'cityscapes' or dataset == 'foggy_driving':
                 gt_fn_ = os.path.join(gt_path_split, fn_.replace('_leftImg8bit_semantic.json','_gtFine_labelTrainIds.png'))
+            if dataset == 'dsec':
+                gt_fn_ = os.path.join(gt_path_split, fn_.replace('_semantic.json','_gtFine_labelTrainIds.png'))
             elif dataset == 'ade20k':
                 gt_fn_ = os.path.join(gt_path, fn_.replace('_semantic.json','.png'))
             img_bytes = file_client.get(gt_fn_)
